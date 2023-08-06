@@ -11,12 +11,20 @@ Mixage.libraryHideTimeout = 4000;
 Mixage.libraryRemainingTime = 0;
 Mixage.scratchPressed = false;
 Mixage.scrollPressed = false;
-Mixage.scratchByWheelTouch = false;
+Mixage.scratchMapState = {
+	'[Channel1]': false,
+	'[Channel2]': false
+};
+Mixage.scrollMapState = {
+	'[Channel1]': false,
+	'[Channel2]': false
+};
+Mixage.scratchByWheelTouch = true;
 Mixage.beatMovePressed = false;
 Mixage.effectRackSelected = [[true, false], [true, false]]; // if effect rack 1/2 is selected for channel 1/2
 Mixage.effectRackEnabled = [false, false]; // if effect rack 1/2 is enabled for channel 1/2
 
-Mixage.init = function (/*id, debugging*/) {
+Mixage.init = function (id, debugging) {
 	Mixage.connectControlsToFunctions('[Channel1]');
 	Mixage.connectControlsToFunctions('[Channel2]');
 	// all buttons off
@@ -55,7 +63,11 @@ Mixage.ledMap = {
 		'loop_enabled': 0x06,
 		'sync_enabled': 0x09,
 		'master_on': 0x07,
-		'fx_on': 0x08
+		'fx_on': 0x08,
+		'scratch_enabled': 0x04,
+		'scroll_enabled': 0x03,
+		'rate_temp_up' : 0x02,
+		'rate_temp_down': 0x01
 	},
 	'[Channel2]': {
 		'cue_indicator': 0x18,
@@ -65,7 +77,11 @@ Mixage.ledMap = {
 		'loop_enabled': 0x14,
 		'sync_enabled': 0x17,
 		'master_on': 0x15,
-		'fx_on': 0x16
+		'fx_on': 0x16,
+		'scratch_enabled': 0x12,
+		'scroll_enabled': 0x11,
+		'rate_temp_up' : 0x10,
+		'rate_temp_down': 0x0f
 	}
 };
 
@@ -76,7 +92,11 @@ Mixage.connectionMap = {
 	'play_indicator': 'Mixage.handlePlay',
 	'pfl': 'Mixage.toggleLED',
 	'loop_enabled': 'Mixage.toggleLED',
-	'sync_enabled': 'Mixage.toggleLED'
+	'sync_enabled': 'Mixage.toggleLED',
+	'scratch_enabled' : 'Mixage.toggleLED',
+	'scroll_enabled' : 'Mixage.toggleLED',
+	'rate_temp_up' : 'Mixage.toggleLED',
+	'rate_temp_down' : 'Mixage.toggleLED',
 };
 
 // Set or remove functions to call when the state of a mixxx control changes
@@ -111,6 +131,41 @@ Mixage.scrollLibrary = function (value) {
 	Mixage.setLibraryMaximized(true);
 	//engine.setValue('[Library]', 'MoveVertical', value);
 	engine.setValue('[Playlist]', 'SelectTrackKnob', value); // for Mixxx < 2.1
+}
+
+Mixage.handleWheelState = function (channel, control, value, status, group) {
+	if (control === 0x04 && value === 0x7F) {
+		Mixage.scratchMapState[group] = !Mixage.scratchMapState[group];
+		Mixage.toggleLED((Mixage.scratchMapState[group]) ? 1 : 0, group, 'scratch_enabled');
+		if (Mixage.scrollMapState[group]) {
+			Mixage.scrollMapState[group] = false;
+			Mixage.toggleLED(0, group, 'scroll_enabled');
+		}
+	}
+	if (control === 0x03 && value === 0x7F){
+		Mixage.scrollMapState[group] = !Mixage.scrollMapState[group];
+		Mixage.toggleLED((Mixage.scrollMapState[group]) ? 1 : 0, group, 'scroll_enabled');
+		if (Mixage.scratchMapState[group]) {
+			Mixage.scratchMapState[group] = false;
+			Mixage.toggleLED(0, group, 'scratch_enabled');
+		}
+	}
+	if (control === 0x12 && value === 0x7F){
+		Mixage.scratchMapState[group] = !Mixage.scratchMapState[group];
+		Mixage.toggleLED((Mixage.scratchMapState[group]) ? 1 : 0, group, 'scratch_enabled');
+		if (Mixage.scrollMapState[group]) {
+			Mixage.scrollMapState[group] = false;
+			Mixage.toggleLED(0, group, 'scroll_enabled');
+		}
+	}
+	if (control === 0x11 && value === 0x7F){
+		Mixage.scrollMapState[group] = !Mixage.scrollMapState[group];
+		Mixage.toggleLED((Mixage.scrollMapState[group]) ? 1 : 0, group, 'scroll_enabled');
+		if (Mixage.scratchMapState[group]) {
+			Mixage.scratchMapState[group] = false;
+			Mixage.toggleLED(0, group, 'scratch_enabled');
+		}
+	}
 }
 
 // A button for the playlist was pressed
@@ -191,9 +246,9 @@ Mixage.scratchActive = function (channel, control, value/*, status, group*/) {
 	var deckNr = control === 0x04 ? 1 : 2;
 	if (value === 0x7F) {
 		Mixage.scratchPressed = true;
-		var alpha = 1.0 / 8.0;
-		var beta = alpha / 32.0;
-		engine.scratchEnable(deckNr, 620, 20.0/*33.0+1.0/3.0*/, alpha, beta);
+		var alpha = 1.0/8;
+        var beta = alpha/32;
+        engine.scratchEnable(deckNr, 128, 33+1/3, alpha, beta);
 	} else {
 		Mixage.scratchPressed = false;
 		engine.scratchDisable(deckNr);
@@ -236,13 +291,30 @@ Mixage.wheelTurn = function (channel, control, value/*, status, group*/) {
 	if (Mixage.scratchPressed) {
 		engine.scratchTick(deckNr, newValue); // scratch
 	}
+	else if (Mixage.scrollPressed) {
+		//Mixage.scrollLibrary(newValue);
+		// fast track search 
+		var playposition = engine.getValue('[Channel'+deckNr+']', "playposition");
+		if (undefined != playposition) { 
+				if (newValue > 0) {
+					engine.setValue('[Channel'+deckNr+']', "playposition", playposition + 0.01);
+				} 
+				else {
+					sengine.setValue('[Channel'+deckNr+']', "playposition", playposition - 0.01);
+				}
+			}
+		}
 	else {
-		engine.scratchDisable(deckNr);
+		engine.setValue('[Channel'+deckNr+']', 'jog', newValue); // Pitch bend
+		if (newValue > 0) {
+			Mixage.toggleLED(1, '[Channel'+deckNr+']', 'rate_temp_up');
+			Mixage.toggleLED(0, '[Channel'+deckNr+']', 'rate_temp_down');
+		} 
+		else if (newValue < 0) {
+			Mixage.toggleLED(1, '[Channel'+deckNr+']', 'rate_temp_down');
+			Mixage.toggleLED(0, '[Channel'+deckNr+']', 'rate_temp_up');
+		}	 
 	}
-	if (Mixage.scrollPressed) {
-		Mixage.scrollLibrary(newValue);
-	}
-	//engine.setValue('[Channel'+deckNr+']', 'jog', newValue); // Pitch bend
 }
 
 // The MASTER button that toggles routing master through effects

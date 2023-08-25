@@ -8,43 +8,46 @@ var Mixage = {};
 Mixage.scratchByWheelTouch = false; // Set to true to scratch by touching the jog wheel instead of having to toggle the disc button. Default is false
 Mixage.scratchTicksPerRevolution = 620; // Number of jog wheel ticks that make a full revolution when scratching. Reduce to "scratch more" of the track, increase to "scratch less". Default is 620 (measured)
 Mixage.jogWheelScrollSpeed = 2.0; // Scroll speed when the jog wheel is used to scroll through the track. The higher, the faster. Default is 1.0
+Mixage.autoMaximizeLibrary = false; // Set to true to automatically max- and minimize the library when the browse button is used. Default is false
+Mixage.libraryHideTimeout = 4000; // Time in ms after which the library will automatically minimized. Default is 4000
+Mixage.libraryReducedHideTimeout = 500; // Time in ms after which the library will be minimized after loading a song into a deck. Default is 500
 
 // ----- Internal variables (don't touch) -----
 var ON = 0x7F, OFF = 0x00, DOWN = 0x7F, UP = 0x00;
 var QUICK_PRESS = 1, DOUBLE_PRESS = 2;
 
 Mixage.vuMeterConnection = [];
-Mixage.beatConnection = [];
 Mixage.loopConnection = [];
+Mixage.beatConnection = [];
+Mixage.fxConnection = [];
+Mixage.libraryHideTimer = 0;
+Mixage.libraryRemainingTime = 0;
 Mixage.doublePressTimer = 0;
-Mixage.beatTimer = 0;
-Mixage.beat = false;
-
-Mixage.focusEffect = {
-	'[Channel1]': 0,
-	'[Channel2]': 0
-};
 
 Mixage.scratchToggleState = {
 	'[Channel1]': false,
-	'[Channel2]': false
+	'[Channel2]': false,
 };
 
 Mixage.scrollToggleState = {
 	'[Channel1]': false,
-	'[Channel2]': false
+	'[Channel2]': false,
 };
 
 Mixage.scratching = {
 	'[Channel1]': false,
-	'[Channel2]': false
+	'[Channel2]': false,
 };
 
 Mixage.isBeatMovePressed = {
 	'[Channel1]': false,
-	'[Channel2]': false
+	'[Channel2]': false,
 };
 
+Mixage.isFxPressed = {
+	'[Channel1]': false,
+	'[Channel2]': false,
+};
 
 Mixage.init = function (id, debugging) {
 	// all button LEDs off
@@ -52,8 +55,14 @@ Mixage.init = function (id, debugging) {
 		midi.sendShortMsg(0x90, i, 0);
 	}
 
+	var numDecks = engine.getValue("[Master]", "num_decks");
+	var numEffectSlots = engine.getValue("[EffectRack1_EffectUnit1]", "num_effects");
+
 	Mixage.connectControlsToFunctions("[Channel1]");
 	Mixage.connectControlsToFunctions("[Channel2]");
+
+	engine.setValue("[EffectRack1_EffectUnit1]", "show_focus", 1);
+	engine.setValue("[EffectRack1_EffectUnit2]", "show_focus", 1);
 
 	// make connection for updating the VU meters
 	Mixage.vuMeterConnection[0] = engine.makeConnection("[Channel1]", "VuMeter", function (val) {
@@ -63,32 +72,66 @@ Mixage.init = function (id, debugging) {
 		midi.sendShortMsg(0x90, 30, val * 7);
 	});
 
-	// make connection for showing the beats on the sync button
-	Mixage.beatConnection[0] = engine.makeConnection("[Channel1]", "beat_active", function (value) {
-		Mixage.toggleLED(value, "[Channel1]", "sync_enabled");
+	// make connection for showing the beats on the loop button when a loop is active
+	Mixage.loopConnection[0] = engine.makeConnection("[Channel1]", "loop_enabled", function (value) {
+		if (value === 1) {
+			Mixage.beatConnection[0] = engine.makeConnection("[Channel1]", "beat_active", function (value) {
+				if (engine.getValue("[Channel1]", "beatloop_size") > 0.125)
+					Mixage.toggleLED(value, "[Channel1]", "loop");
+				else {
+					Mixage.toggleLED(ON, "[Channel1]", "loop");
+				}
+			});
+		} else {
+			Mixage.beatConnection[0].disconnect();
+			Mixage.toggleLED(OFF, "[Channel1]", "loop");
+		}
 	});
-	Mixage.beatConnection[1] = engine.makeConnection("[Channel2]", "beat_active", function (value) {
-		Mixage.toggleLED(value, "[Channel2]", "sync_enabled");
+	Mixage.loopConnection[1] = engine.makeConnection("[Channel2]", "loop_enabled", function (value) {
+		if (value === 1) {
+			Mixage.beatConnection[1] = engine.makeConnection("[Channel2]", "beat_active", function (value) {
+				if (engine.getValue("[Channel2]", "beatloop_size") > 0.125)
+					Mixage.toggleLED(value, "[Channel2]", "loop");
+				else {
+					Mixage.toggleLED(ON, "[Channel2]", "loop");
+				}
+			});
+		} else {
+			Mixage.beatConnection[1].disconnect();
+			Mixage.toggleLED(OFF, "[Channel2]", "loop");
+		}
 	});
-	
-	// Mixage.beatConnection[2] = engine.makeConnection("[Channel1]", "loop_enabled", function (value) {
-	// 	if (value === 1) {
-	// 		Mixage.loopConnection[0] = engine.makeConnection("[Channel1]", "beat_active", function (value) {
-	// 			if (value === 1) {
-	// 				Mixage.beat = !Mixage.beat
-	// 				Mixage.toggleLED(Mixage.beat, "[Channel1]", "loop");
-	// 			}
-	// 		});
-	// 	} else {
-	// 		Mixage.loopConnection[0].disconnect();
-	// 		Mixage.toggleLED(OFF, "[Channel1]", "loop");
-	// 	}
-	// });
 
-	var numEffectSlots = engine.getValue("[EffectRack1_EffectUnit1]", "num_effects");
+	Mixage.fxConnection[0] = engine.makeConnection("[EffectRack1_EffectUnit1]", "focused_effect", function (val) {
+		if (val === 0){
+			Mixage.toggleLED(OFF, "[Channel1]", "fx_sel");
+			engine.softTakeoverIgnoreNextValue("[EffectRack1_EffectUnit1]", "super1");
+		} else {
+			Mixage.toggleLED(ON, "[Channel1]", "fx_sel");
+			engine.softTakeoverIgnoreNextValue("[EffectRack1_EffectUnit2_Effect" + val + "]", "meta");
+		}
+	});
+
+	Mixage.fxConnection[1] = engine.makeConnection("[EffectRack1_EffectUnit2]", "focused_effect", function (val) {
+		if (val === 0){
+			Mixage.toggleLED(OFF, "[Channel2]", "fx_sel");
+			engine.softTakeoverIgnoreNextValue("[EffectRack1_EffectUnit1]", "super1");
+		} else {
+			Mixage.toggleLED(ON, "[Channel2]", "fx_sel");
+			engine.softTakeoverIgnoreNextValue("[EffectRack1_EffectUnit2_Effect" + val + "]", "meta");
+		}
+	});
+
+	//restore deck sync master LEDs (function currently not working as of 2.3.3)
+	//var isDeck1SyncLeader = engine.getValue("[Channel1]", "sync_master");
+	//Mixage.toggleLED(isDeck1SyncLeader ? 1 : 0, "[Channel1]", "sync_master");
+	//var isDeck2SyncLeader = engine.getValue("[Channel2]", "sync_master");
+	//Mixage.toggleLED(isDeck2SyncLeader ? 1 : 0, "[Channel2]", "sync_master");
 
 	engine.softTakeover("[EffectRack1_EffectUnit1]", "super1", true);
 	engine.softTakeover("[EffectRack1_EffectUnit2]", "super1", true);
+	engine.softTakeover("[QuickEffectRack1_[Channel1]]", "super1", true);
+	engine.softTakeover("[QuickEffectRack1_[Channel2]]", "super1", true);
 
 	for (var i = 1; i < numEffectSlots; i++) {
 		var groupString = "[EffectRack1_EffectUnit1_Effect" + i + "]";
@@ -104,9 +147,12 @@ Mixage.init = function (id, debugging) {
 Mixage.shutdown = function () {
 	Mixage.vuMeterConnection[0].disconnect();
 	Mixage.vuMeterConnection[1].disconnect();
+	Mixage.loopConnection[0].disconnect();
+	Mixage.loopConnection[1].disconnect();
 	Mixage.beatConnection[0].disconnect();
 	Mixage.beatConnection[1].disconnect();
-	Mixage.beatConnection[2].disconnect();
+	Mixage.fxConnection[0].disconnect();
+	Mixage.fxConnection[1].disconnect();
 	Mixage.connectControlsToFunctions("[Channel1]", true);
 	Mixage.connectControlsToFunctions("[Channel2]", true);
 	// all button LEDs off
@@ -132,7 +178,7 @@ Mixage.ledMap = {
 		"scratch_active": 0x04,
 		"scroll_active": 0x03,
 		'rate_temp_up': 0x02,
-		'rate_temp_down': 0x01
+		'rate_temp_down': 0x01,
 	},
 	"[Channel2]": {
 		"cue_indicator": 0x18,
@@ -149,7 +195,7 @@ Mixage.ledMap = {
 		"scratch_active": 0x12,
 		"scroll_active": 0x11,
 		'rate_temp_up': 0x10,
-		'rate_temp_down': 0x0f
+		'rate_temp_down': 0x0f,
 	}
 };
 
@@ -159,7 +205,8 @@ Mixage.connectionMap = {
 	"cue_default": [function (v, g, c) { Mixage.toggleLED(v, g, c); }, null],
 	"play_indicator": [function (v, g, c) { Mixage.handlePlay(v, g, c); }, null],
 	"pfl": [function (v, g, c) { Mixage.toggleLED(v, g, c); }, null],
-	"loop_enabled": [function (v, g, c) { Mixage.toggleLED(v, g, c); }, null]
+	"loop_enabled": [function (v, g, c) { Mixage.toggleLED(v, g, c); }, null],
+	"sync_enabled": [function (v, g, c) { Mixage.toggleLED(v, g, c); }, null],
 };
 
 // Set or remove functions to call when the state of a mixxx control changes
@@ -189,6 +236,38 @@ Mixage.handlePlay = function (value, group, control) {
 	Mixage.toggleLED(value, group, "load_indicator");
 };
 
+// Set the library visible and hide it when libraryHideTimeOut is reached
+Mixage.setLibraryMaximized = function (visible) {
+	if (visible === true) {
+		Mixage.libraryRemainingTime = Mixage.libraryHideTimeout;
+		// maximize library if not maximized already
+		if (engine.getValue("[Master]", "maximize_library") !== true) {
+			engine.setValue("[Master]", "maximize_library", true);
+			if (Mixage.libraryHideTimer === 0) {
+				// timer not running. start it
+				Mixage.libraryHideTimer = engine.beginTimer(Mixage.libraryHideTimeout / 5, Mixage.libraryCheckTimeout);
+			}
+		}
+	} else {
+		if (Mixage.libraryHideTimer !== 0) {
+			engine.stopTimer(Mixage.libraryHideTimer);
+			Mixage.libraryHideTimer = 0;
+		}
+		Mixage.libraryRemainingTime = 0;
+		engine.setValue("[Master]", "maximize_library", false);
+	}
+};
+
+Mixage.libraryCheckTimeout = function () {
+	Mixage.libraryRemainingTime -= Mixage.libraryHideTimeout / 5;
+	if (Mixage.libraryRemainingTime <= 0) {
+		engine.stopTimer(Mixage.libraryHideTimer);
+		Mixage.libraryHideTimer = 0;
+		Mixage.libraryRemainingTime = 0;
+		engine.setValue("[Master]", "maximize_library", false);
+	}
+};
+
 Mixage.handleTraxPress = function (channel, control, value, status, group) {
 	if (value == DOWN) {
 		if (Mixage.doublePressTimer === 0) { // first press
@@ -204,6 +283,9 @@ Mixage.handleTraxPress = function (channel, control, value, status, group) {
 
 Mixage.handleTraxTurn = function (channel, control, value, status, group) {
 	var newValue = value - 64;
+	if (Mixage.autoMaximizeLibrary) {
+		Mixage.setLibraryMaximized(true);
+	}
 	if (control === 0x5E) { // was shift pressed?
 		engine.setValue("[Playlist]", "SelectPlaylist", newValue);
 	} else {
@@ -221,6 +303,9 @@ Mixage.handleTrackLoading = function (channel, control, value, status, group) {
 
 Mixage.TraxPressCallback = function (channel, control, value, status, group, event) {
 	if (event === QUICK_PRESS) {
+		if (Mixage.autoMaximizeLibrary) {
+			Mixage.setLibraryMaximized(true);
+		}
 		if (engine.getValue("[PreviewDeck1]", "play")) {
 			engine.setValue("[PreviewDeck1]", "stop", true);
 		} else {
@@ -235,22 +320,21 @@ Mixage.TraxPressCallback = function (channel, control, value, status, group, eve
 
 Mixage.nextEffect = function (channel, control, value, status, group) {
 	var unitNr = script.deckFromGroup(group);
-	var numEffectSlots = engine.getValue("[EffectRack1_EffectUnit" + unitNr + "]", "num_effects");
+	var controlString = "[EffectRack1_EffectUnit" + unitNr + "]";
+	//for some reason one more effect slot is returned than visible in the ui, thus the minus 1
+	var numEffectSlots = engine.getValue(controlString, "num_effectslots") - 1;
 	if (value === DOWN) {
-		if (Mixage.focusEffect[group] === (numEffectSlots - 1)) {
-			Mixage.focusEffect[group] = 0;
-			Mixage.toggleLED(0, group, "fx_sel");
-			for (var i = 1; i < numEffectSlots; i++) {
+		if (engine.getValue(controlString, "focused_effect") === numEffectSlots) {
+			for (var i = 1; i === numEffectSlots; i++) {
 				var groupString = "[EffectRack1_EffectUnit" + unitNr + "_Effect" + i + "]";
 				engine.softTakeoverIgnoreNextValue(groupString, "meta");
 			}
-			engine.softTakeoverIgnoreNextValue("[EffectRack1_EffectUnit" + unitNr + "]", "super1");
+			engine.softTakeoverIgnoreNextValue(controlString, "super1");
+			engine.setValue(controlString, "focused_effect", 0);
 		} else {
-			Mixage.focusEffect[group] += 1;
-			Mixage.toggleLED(1, group, "fx_sel");
+			var currentSelection = engine.getValue(controlString, "focused_effect");
+			engine.setValue(controlString, "focused_effect", currentSelection + 1);
 		}
-		engine.setValue("[EffectRack1_EffectUnit" + unitNr + "]", "focused_effect", Mixage.focusEffect[group]);
-		engine.setValue("[EffectRack1_EffectUnit" + unitNr + "]", "show_focus", 1);
 	}
 };
 
@@ -258,23 +342,26 @@ Mixage.handleEffectDryWet = function (channel, control, value, status, group) {
 	var unitNr = script.deckFromGroup(group);
 	var controlString = "[EffectRack1_EffectUnit" + unitNr + "]";
 	var diff = (value - 64) // 16.0;
-	if (engine.getValue(controlString, "focused_effect") === 0) {
+	if (Mixage.isBeatMovePressed[group]) {
+		Mixage.setFxChannels(diff)
+	} else if (engine.getValue(controlString, "focused_effect") === 0) {
 		var dryWetValue = engine.getValue(controlString, "mix");
 		engine.setValue(controlString, "mix", dryWetValue + (diff / 16.0));
 	} else {
-		engine.setValue("[EffectRack1_EffectUnit" + unitNr + "_Effect" + Mixage.focusEffect[group] + "]", "effect_selector", diff);
+		var focussedEffect = engine.getValue("[EffectRack1_EffectUnit" + unitNr + "]", "focused_effect")
+		engine.setValue("[EffectRack1_EffectUnit" + unitNr + "_Effect" + focussedEffect + "]", "effect_selector", diff);
 	}
 };
 
 Mixage.handleDryWetPressed = function (channel, control, value, status, group) {
 	var unitNr = script.deckFromGroup(group);
-	var effectNum = Mixage.focusEffect[group]
+	var focussedEffect = engine.getValue("[EffectRack1_EffectUnit" + unitNr + "]", "focused_effect")
 	var numEffectSlots = engine.getValue("[EffectRack1_EffectUnit" + unitNr + "]", "num_effects");
-	if (value === DOWN && effectNum != 0) {
-		var status = engine.getValue("[EffectRack1_EffectUnit" + unitNr + "_Effect" + effectNum + "]", "enabled");
-		engine.setValue("[EffectRack1_EffectUnit" + unitNr + "_Effect" + effectNum + "]", "enabled", !status);
+	if (value === DOWN && focussedEffect != 0) {
+		var status = engine.getValue("[EffectRack1_EffectUnit" + unitNr + "_Effect" + focussedEffect + "]", "enabled");
+		engine.setValue("[EffectRack1_EffectUnit" + unitNr + "_Effect" + focussedEffect + "]", "enabled", !status);
 	}
-	if (value === DOWN && effectNum === 0) {
+	if (value === DOWN && focussedEffect === 0) {
 		for (var i = 1; i < numEffectSlots; i++) {
 			engine.setValue("[EffectRack1_EffectUnit" + unitNr + "_Effect" + i + "]", "enabled", false);
 		}
@@ -284,10 +371,47 @@ Mixage.handleDryWetPressed = function (channel, control, value, status, group) {
 Mixage.handleFxAmount = function (channel, control, value, status, group) {
 	var unitNr = script.deckFromGroup(group);
 	var controlString = "[EffectRack1_EffectUnit" + unitNr + "]";
-	if (engine.getValue(controlString, "focused_effect") === 0) {
-		engine.setValue("[EffectRack1_EffectUnit" + unitNr + "]", "super1", value / 127);
+	var focussedEffect = engine.getValue(controlString, "focused_effect")
+	if (focussedEffect === 0) {
+		engine.setValue(controlString, "super1", value / 127);
 	} else {
-		engine.setValue("[EffectRack1_EffectUnit" + unitNr + "_Effect" + Mixage.focusEffect[group] + "]", "meta", value / 127);
+		engine.setValue("[EffectRack1_EffectUnit" + unitNr + "_Effect" + focussedEffect + "]", "meta", value / 127);
+	}
+};
+
+Mixage.handleFxPress = function (channel, control, value, status, group) {
+	if (value === DOWN) {
+		var numUnits = engine.getValue("[EffectRack1]", "num_effectunits");
+		var fxChannel = "group_" + group + "_enable";
+		var unitNr = script.deckFromGroup(group);
+		var enabledFxGroups = [];
+
+		for (var i = 1; i <= numUnits; i++) {
+			enabledFxGroups.push(engine.getValue("[EffectRack1_EffectUnit" + i + "]", fxChannel));
+		}
+
+		if (enabledFxGroups.indexOf(1) !== -1) {
+			for (var i = 1; i <= numUnits; i++) {
+				engine.setValue("[EffectRack1_EffectUnit" + i + "]", fxChannel, false);
+			}
+		} else {
+			engine.setValue("[EffectRack1_EffectUnit" + unitNr + "]", fxChannel, true);
+		}
+	}
+};
+
+// This function is necessary to allow for soft takeover of the filter amount button
+// see https://github.com/mixxxdj/mixxx/wiki/Midi-Scripting#soft-takeover
+Mixage.handleFilter = function (channel, control, value, status, group) {
+	engine.setValue("[QuickEffectRack1_"+ group +"]", "super1", value / 127);
+};
+
+//Handles setting soft takeovers when pressing shift
+Mixage.handleShift = function (channel, control, value, status, group) {
+	if (value === DOWN) {
+		var unitNr = script.deckFromGroup(group);
+		engine.softTakeoverIgnoreNextValue("[QuickEffectRack1_"+group+"]", "super1");
+		engine.softTakeoverIgnoreNextValue("[EffectRack1_EffectUnit"+unitNr+"]", "super1");
 	}
 };
 
@@ -355,6 +479,28 @@ Mixage.wheelTurn = function (channel, control, value, status, group) {
 	}
 };
 
+// The MASTER button that toggles a deck as sync leader / master
+Mixage.handleDeckSyncMode = function (_channel, _control, _value, _status, _group) {
+	// Function currently not working as of 2.3.3: https://manual.mixxx.org/2.4/gl/chapters/appendix/mixxx_controls.html#control-[ChannelN]-sync_master
+	// Disable until this is working
+	/*// calculate effect unit number from MIDI control. 0x46 controls unit 1, 0x54 unit 2
+	var deckNr = control === 0x46 ? 1 : 2;
+	// react only on first message / keydown
+	if (value === 0x7F) {
+		// check and toggle enablement
+		var controlString = "[Channel" + deckNr + "]";
+		var keyString = "sync_master";
+		var isSyncLeader = !engine.getValue(controlString, keyString);
+		// if we want to make this deck sync leader, turn off sync leader on the other deck
+		if (isSyncLeader) {
+			var otherDeckNr = deckNr === 1 ? 2 : 1;
+			engine.setValue("[Channel" + otherDeckNr + "]", keyString, false);
+		}
+		engine.setValue(controlString, keyString, isSyncLeader);
+		Mixage.toggleLED(isSyncLeader ? 1 : 0, controlString, keyString);
+	}*/
+};
+
 Mixage.handleBeatMove = function (channel, control, value, status, group) {
 	// control centers on 0x40 (64), calculate difference to that
 	var diff = (value - 64);
@@ -376,6 +522,7 @@ Mixage.handleLoopLength = function (channel, control, value, status, group) {
 	} else {
 		var loopScale = diff > 0 ? "loop_double" : "loop_halve";
 		engine.setValue(group, loopScale, true);
+		print(engine.getValue(group, "beatloop_size"));
 	}
 };
 

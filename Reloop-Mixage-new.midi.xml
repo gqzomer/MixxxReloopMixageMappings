@@ -55,11 +55,11 @@
       <!-- T3 = Shift Button -->
       <control>
         <group>[Channel1]</group>
-        <key></key>
+        <key>Mixage.handleShift</key>
         <status>0x90</status>
         <midino>0x2A</midino>
         <options>
-          <normal />
+          <script-binding />
         </options>
       </control>
       <!-- T4 = Autoloop -->
@@ -243,12 +243,12 @@
       </control>
       <!-- T11_TURN_SHIFT = Filter Dial -->
       <control>
-        <group>[QuickEffectRack1_[Channel1]]</group>
-        <key>super1</key>
+        <group>[Channel1]</group>
+        <key>Mixage.handleFilter</key>
         <status>0xB0</status>
         <midino>0x73</midino>
         <options>
-          <normal />
+          <script-binding />
         </options>
       </control>
       <!-- T11_CENTER = ? -->
@@ -273,12 +273,12 @@
       </control>
       <!-- T12 = FX On Button -->
       <control>
-        <group>[EffectRack1_EffectUnit1]</group>
-        <key>group_[Channel1]_enable</key>
+        <group>[Channel1]</group>
+        <key>Mixage.handleFxPress</key>
         <status>0x90</status>
         <midino>0x08</midino>
         <options>
-          <normal />
+          <script-binding />
         </options>
       </control>
       <!-- T12_SHIFT = Keylock Button -->
@@ -614,11 +614,11 @@
       <!-- T3 = Shift Button -->
       <control>
         <group>[Channel2]</group>
-        <key></key>
+        <key>Mixage.handleShift</key>
         <status>0x90</status>
         <midino>0x2B</midino>
         <options>
-          <normal />
+          <script-binding />
         </options>
       </control>
       <!-- T4 = Autoloop -->
@@ -802,12 +802,12 @@
       </control>
       <!-- T11_TURN_SHIFT = Filter Dial -->
       <control>
-        <group>[QuickEffectRack1_[Channel2]]</group>
-        <key>super1</key>
+        <group>[Channel2]</group>
+        <key>Mixage.handleFilter</key>
         <status>0xB0</status>
         <midino>0x79</midino>
         <options>
-          <normal />
+          <script-binding />
         </options>
       </control>
       <!-- T11_CENTER = ? -->
@@ -1201,6 +1201,48 @@
       </output>
       <output>
         <group>[EffectRack1_EffectUnit2]</group>
+        <key>group_[Channel1]_enable</key>
+        <status>0x90</status>
+        <midino>0x08</midino>
+        <minimum>0.5</minimum>
+      </output>
+      <output>
+        <group>[EffectRack1_EffectUnit3]</group>
+        <key>group_[Channel1]_enable</key>
+        <status>0x90</status>
+        <midino>0x08</midino>
+        <minimum>0.5</minimum>
+      </output>
+      <output>
+        <group>[EffectRack1_EffectUnit4]</group>
+        <key>group_[Channel1]_enable</key>
+        <status>0x90</status>
+        <midino>0x08</midino>
+        <minimum>0.5</minimum>
+      </output>
+      <output>
+        <group>[EffectRack1_EffectUnit1]</group>
+        <key>group_[Channel2]_enable</key>
+        <status>0x90</status>
+        <midino>0x16</midino>
+        <minimum>0.5</minimum>
+      </output>
+      <output>
+        <group>[EffectRack1_EffectUnit2]</group>
+        <key>group_[Channel2]_enable</key>
+        <status>0x90</status>
+        <midino>0x16</midino>
+        <minimum>0.5</minimum>
+      </output>
+      <output>
+        <group>[EffectRack1_EffectUnit3]</group>
+        <key>group_[Channel2]_enable</key>
+        <status>0x90</status>
+        <midino>0x16</midino>
+        <minimum>0.5</minimum>
+      </output>
+      <output>
+        <group>[EffectRack1_EffectUnit4]</group>
         <key>group_[Channel2]_enable</key>
         <status>0x90</status>
         <midino>0x16</midino>
